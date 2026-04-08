@@ -5,8 +5,8 @@ Sentiment Analysis – Phase 2  (Complete Pipeline)
 Team #6 | Dataset: Software (Amazon Product Reviews)
 
 Steps covered:
-  11(a) – Dataset Selection          (Omair Khan)
-  11(b) – Data Preprocessing         (Omair Khan)
+  11(a) – Dataset Selection          
+  11(b) – Data Preprocessing         
   11(c) – Text Representation        (TF-IDF)
   11(d) – Train / Test Split         (70 / 30, stratified)
   11(e) – Model Development          (Logistic Regression + LinearSVC)
