@@ -1,14 +1,16 @@
 # -*- coding: utf-8 -*-
-"""Team6_Phase2_ML_Models.py
+"""team6_phase2_complete.py
 
-Sentiment Analysis – Phase 2
+Sentiment Analysis – Phase 2  (Complete Pipeline)
 Team #6 | Dataset: Software (Amazon Product Reviews)
 
-Section 11.e  – Two ML Sentiment Analysis Models (70% training split)
-  Model 1: Logistic Regression
-  Model 2: Support Vector Machine (LinearSVC)
-
-Section 12    – Training results are printed for inclusion in the report.
+Steps covered:
+  11(a) – Dataset Selection          (Omair Khan)
+  11(b) – Data Preprocessing         (Omair Khan)
+  11(c) – Text Representation        (TF-IDF)
+  11(d) – Train / Test Split         (70 / 30, stratified)
+  11(e) – Model Development          (Logistic Regression + LinearSVC)
+  12    – Training Results Summary
 """
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -16,17 +18,22 @@ Section 12    – Training results are printed for inclusion in the report.
 # ─────────────────────────────────────────────────────────────────────────────
 import subprocess, sys
 
-packages = ['scikit-learn', 'pandas', 'numpy', 'matplotlib', 'seaborn']
+packages = ['scikit-learn', 'pandas', 'numpy', 'matplotlib', 'seaborn',
+            'nltk']
 for pkg in packages:
     subprocess.check_call([sys.executable, '-m', 'pip', 'install', pkg, '-q'])
 
-import json, re, warnings, time
+import json, os, re, warnings, time
 warnings.filterwarnings('ignore')
 
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
+
+import nltk
+from nltk.corpus import stopwords
+from nltk.stem import WordNetLemmatizer
 
 from sklearn.model_selection import train_test_split
 from sklearn.feature_extraction.text import TfidfVectorizer
@@ -38,18 +45,22 @@ from sklearn.metrics import (
     accuracy_score, f1_score, precision_score, recall_score
 )
 
+# Download required NLTK resources
+for resource in ['stopwords', 'wordnet', 'omw-1.4']:
+    nltk.download(resource, quiet=True)
+
 sns.set_theme(style='whitegrid', palette='muted')
 plt.rcParams['figure.dpi'] = 110
 print('Imports complete.')
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 1.  Load Dataset
-#     Reads Software_5.json (or _1.json if running locally with the subset).
+# STEP 11(a) — DATASET SELECTION
+# Author: Omair Khan
 # ─────────────────────────────────────────────────────────────────────────────
-import os
 
+# Load Amazon Software review data (JSON Lines format)
 JSON_CANDIDATES = ['Software_5.json', 'Software_5_1.json']
-records = []
+data = []
 
 for fname in JSON_CANDIDATES:
     if os.path.exists(fname):
@@ -58,7 +69,7 @@ for fname in JSON_CANDIDATES:
             for line in f:
                 line = line.strip()
                 if line:
-                    records.append(json.loads(line))
+                    data.append(json.loads(line))
         break
 else:
     raise FileNotFoundError(
@@ -66,86 +77,141 @@ else:
         'Download: https://nijianmo.github.io/amazon/index.html'
     )
 
-df_raw = pd.DataFrame(records)
-print(f'Loaded {len(df_raw):,} records | Columns: {df_raw.columns.tolist()}')
+# Convert to DataFrame
+df = pd.DataFrame(data)
+
+# Keep only fields needed for sentiment analysis
+df = df[['reviewText', 'summary', 'overall']].copy()
+
+# Drop rows with missing text or rating
+df.dropna(subset=['reviewText', 'overall'], inplace=True)
+
+# Combine summary and reviewText for richer text input
+df['text'] = df['summary'].fillna('') + ' ' + df['reviewText'].fillna('')
+df['text'] = df['text'].str.strip()
+
+# Remove rows where combined text is empty
+df = df[df['text'] != '']
+
+# Convert numerical ratings to sentiment labels
+def map_sentiment(rating):
+    if rating in [1, 2]:   return 'negative'
+    elif rating == 3:       return 'neutral'
+    elif rating in [4, 5]:  return 'positive'
+
+df['sentiment'] = df['overall'].apply(map_sentiment)
+
+# Select a random subset of 3,000 reviews (exceeds the 2,000-review minimum)
+SEED = 42
+df_subset = df.sample(n=3000, random_state=SEED).reset_index(drop=True)
+
+# Basic exploration on the selected subset
+print('\n--- STEP 11(a): Dataset Selection ---')
+print('Selected subset shape:', df_subset.shape)
+print('\nSentiment distribution:')
+print(df_subset['sentiment'].value_counts())
+
+df_subset['review_length_words'] = df_subset['text'].apply(lambda x: len(x.split()))
+print('\nReview length statistics (words):')
+print(df_subset['review_length_words'].describe())
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 2.  Preprocessing — reuse Phase 1 decisions
+# STEP 11(b) — DATA PREPROCESSING
+# Author: Omair Khan
 # ─────────────────────────────────────────────────────────────────────────────
-df_raw['reviewText']    = df_raw['reviewText'].fillna('')
-df_raw['summary']       = df_raw['summary'].fillna('')
-df_raw['combined_text'] = (df_raw['summary'] + ' ' + df_raw['reviewText']).str.strip()
-df_raw['len_words']     = df_raw['reviewText'].apply(lambda x: len(x.split()))
 
-# Label assignment (Phase 1 scheme)
-def assign_label(r):
-    if r >= 4:   return 'Positive'
-    elif r == 3: return 'Neutral'
-    else:        return 'Negative'
+print('\n--- STEP 11(b): Data Preprocessing ---')
 
-df_raw['label'] = df_raw['overall'].apply(assign_label)
+stop_words = set(stopwords.words('english'))
+lemmatizer = WordNetLemmatizer()
 
-# Drop very short reviews (Phase 1 filter)
-df = df_raw[df_raw['len_words'] >= 3].copy().reset_index(drop=True)
-print(f'\nAfter filtering short reviews: {len(df):,} records')
-print('Label distribution:')
-print(df['label'].value_counts())
-
-# Text cleaning for ML (sklearn-native; no NLTK tokenizer needed)
-def clean_text(text: str) -> str:
-    """Lowercase, strip HTML/URLs/punctuation — suited for TF-IDF."""
-    text = re.sub(r'<[^>]+>', ' ', text)           # remove HTML tags
-    text = re.sub(r'http\S+|www\.\S+', ' ', text)  # remove URLs
+def preprocess_text(text):
+    # 1. Lowercase
     text = text.lower()
-    text = re.sub(r'[^a-z\s]', ' ', text)          # keep letters only
-    return re.sub(r'\s+', ' ', text).strip()
+    # 2. Remove punctuation, digits, and special characters
+    text = re.sub(r'[^a-z\s]', ' ', text)
+    # 3. Tokenize (whitespace split)
+    tokens = text.split()
+    # 4. Remove stopwords
+    tokens = [w for w in tokens if w not in stop_words]
+    # 5. Lemmatize
+    tokens = [lemmatizer.lemmatize(w) for w in tokens]
+    return ' '.join(tokens)
 
-df['clean_text'] = df['combined_text'].apply(clean_text)
-print('\nSample cleaned text:')
-print(df['clean_text'].iloc[0][:200])
+df_subset['clean_text'] = df_subset['text'].apply(preprocess_text)
+
+# Show before / after examples
+print('\nSample before and after preprocessing:')
+for i in range(3):
+    print(f'\n[Review {i+1}]')
+    print('  Original :', df_subset.iloc[i]['text'][:200])
+    print('  Cleaned  :', df_subset.iloc[i]['clean_text'][:200])
+
+# Save preprocessed subset for reference
+df_subset.to_csv('phase2_subset_preprocessed.csv', index=False)
+print('\nPreprocessed dataset saved as: phase2_subset_preprocessed.csv')
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 3.  Train / Test Split  (70 % train, 30 % test)
+# STEP 11(c) — TEXT REPRESENTATION  (TF-IDF)
 # ─────────────────────────────────────────────────────────────────────────────
-SEED    = 42
+print('\n--- STEP 11(c): Text Representation (TF-IDF) ---')
+
+# TF-IDF converts the cleaned text into a numerical feature matrix.
+# Settings chosen:
+#   - stop_words='english'  : removes common English words (sklearn built-in)
+#   - max_features=50,000   : caps vocabulary to top 50k terms by frequency
+#   - ngram_range=(1,2)     : includes unigrams and bigrams (e.g. "not good")
+#   - sublinear_tf=True     : applies log(1+tf) to dampen high-frequency terms
+#
+# TF-IDF is applied inside the sklearn Pipeline at training time (Steps 11e),
+# so it is fitted only on X_train and never on X_test (preventing data leakage).
+
+TFIDF_PARAMS = dict(
+    stop_words='english',
+    max_features=50_000,
+    ngram_range=(1, 2),
+    sublinear_tf=True,
+)
+print('TF-IDF settings:', TFIDF_PARAMS)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# STEP 11(d) — TRAIN / TEST SPLIT  (70 % train, 30 % test)
+# ─────────────────────────────────────────────────────────────────────────────
+print('\n--- STEP 11(d): Train / Test Split ---')
+
+# Capitalise labels to match the rest of the pipeline
+df_subset['label'] = df_subset['sentiment'].str.capitalize()  # positive→Positive etc.
+
 CLASSES = ['Positive', 'Neutral', 'Negative']
 
-X = df['clean_text']
-y = df['label']
+X = df_subset['clean_text']
+y = df_subset['label']
 
 X_train, X_test, y_train, y_test = train_test_split(
     X, y,
     test_size=0.30,
     random_state=SEED,
-    stratify=y          # preserve class proportions
+    stratify=y        # preserve class proportions in both splits
 )
 
-print(f'\nTrain set: {len(X_train):,} reviews (70 %)')
-print(f'Test  set: {len(X_test):,} reviews (30 %)')
+print(f'Train set: {len(X_train):,} reviews (70%)')
+print(f'Test  set: {len(X_test):,} reviews (30%)')
 print('\nTrain label distribution:')
 print(y_train.value_counts())
 print('\nTest label distribution:')
 print(y_test.value_counts())
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 4.  Shared TF-IDF Settings
-#     (same vectoriser config for fair comparison)
+# STEP 11(e) — MODEL DEVELOPMENT
+# Model 1: Logistic Regression
+# Model 2: Support Vector Machine (LinearSVC)
 # ─────────────────────────────────────────────────────────────────────────────
-TFIDF_PARAMS = dict(
-    stop_words='english',   # built-in sklearn English stop-word list
-    max_features=50_000,    # vocabulary cap
-    ngram_range=(1, 2),     # unigrams + bigrams
-    sublinear_tf=True,      # log(1 + tf) dampening
-)
 
-# ─────────────────────────────────────────────────────────────────────────────
-# 5.  MODEL 1 — Logistic Regression
-# ─────────────────────────────────────────────────────────────────────────────
+# ── Model 1: Logistic Regression ─────────────────────────────────────────────
 print('\n' + '='*62)
 print('  MODEL 1: Logistic Regression')
 print('='*62)
 
-# --- Hyperparameter tuning (manual sweep over C) ---
 print('\nHyperparameter sweep — C values: [0.1, 0.5, 1.0, 5.0]')
 print(f'{"C":<8} {"Accuracy":>10} {"F1-W":>10}')
 print('-'*30)
@@ -166,7 +232,7 @@ for C in [0.1, 0.5, 1.0, 5.0]:
 best_C_lr = max(lr_results, key=lambda c: lr_results[c][1])
 print(f'\n  → Best C = {best_C_lr}  (F1-W = {lr_results[best_C_lr][1]:.4f})')
 
-# --- Final LR model (best C) ---
+# Final LR model with best C
 lr_final = Pipeline([
     ('tfidf', TfidfVectorizer(**TFIDF_PARAMS)),
     ('clf',   LogisticRegression(C=best_C_lr, max_iter=1000, random_state=SEED,
@@ -177,7 +243,6 @@ lr_final.fit(X_train, y_train)
 lr_train_time = time.time() - t0
 
 y_pred_lr = lr_final.predict(X_test)
-
 lr_acc  = accuracy_score(y_test, y_pred_lr)
 lr_prec = precision_score(y_test, y_pred_lr, labels=CLASSES, average='weighted', zero_division=0)
 lr_rec  = recall_score(y_test, y_pred_lr, labels=CLASSES, average='weighted', zero_division=0)
@@ -196,18 +261,14 @@ print(f'  Recall (W)    : {lr_rec:.4f}')
 print(f'  F1 (W)        : {lr_f1:.4f}')
 print('\n  Per-class Classification Report:')
 print(classification_report(y_test, y_pred_lr, labels=CLASSES, zero_division=0))
-print('  Confusion Matrix  (rows = Actual, cols = Predicted):')
-lr_cm_df = pd.DataFrame(lr_cm, index=CLASSES, columns=CLASSES)
-print(lr_cm_df.to_string())
+print('  Confusion Matrix (rows = Actual, cols = Predicted):')
+print(pd.DataFrame(lr_cm, index=CLASSES, columns=CLASSES).to_string())
 
-# ─────────────────────────────────────────────────────────────────────────────
-# 6.  MODEL 2 — Support Vector Machine (LinearSVC)
-# ─────────────────────────────────────────────────────────────────────────────
+# ── Model 2: LinearSVC ────────────────────────────────────────────────────────
 print('\n' + '='*62)
 print('  MODEL 2: Support Vector Machine (LinearSVC)')
 print('='*62)
 
-# --- Hyperparameter tuning (manual sweep over C) ---
 print('\nHyperparameter sweep — C values: [0.01, 0.1, 0.5, 1.0, 5.0]')
 print(f'{"C":<8} {"Accuracy":>10} {"F1-W":>10}')
 print('-'*30)
@@ -227,7 +288,7 @@ for C in [0.01, 0.1, 0.5, 1.0, 5.0]:
 best_C_svm = max(svm_results, key=lambda c: svm_results[c][1])
 print(f'\n  → Best C = {best_C_svm}  (F1-W = {svm_results[best_C_svm][1]:.4f})')
 
-# --- Final SVM model (best C) ---
+# Final SVM model with best C
 svm_final = Pipeline([
     ('tfidf', TfidfVectorizer(**TFIDF_PARAMS)),
     ('clf',   LinearSVC(C=best_C_svm, random_state=SEED, class_weight='balanced', max_iter=3000))
@@ -237,7 +298,6 @@ svm_final.fit(X_train, y_train)
 svm_train_time = time.time() - t0
 
 y_pred_svm = svm_final.predict(X_test)
-
 svm_acc  = accuracy_score(y_test, y_pred_svm)
 svm_prec = precision_score(y_test, y_pred_svm, labels=CLASSES, average='weighted', zero_division=0)
 svm_rec  = recall_score(y_test, y_pred_svm, labels=CLASSES, average='weighted', zero_division=0)
@@ -256,15 +316,14 @@ print(f'  Recall (W)    : {svm_rec:.4f}')
 print(f'  F1 (W)        : {svm_f1:.4f}')
 print('\n  Per-class Classification Report:')
 print(classification_report(y_test, y_pred_svm, labels=CLASSES, zero_division=0))
-print('  Confusion Matrix  (rows = Actual, cols = Predicted):')
-svm_cm_df = pd.DataFrame(svm_cm, index=CLASSES, columns=CLASSES)
-print(svm_cm_df.to_string())
+print('  Confusion Matrix (rows = Actual, cols = Predicted):')
+print(pd.DataFrame(svm_cm, index=CLASSES, columns=CLASSES).to_string())
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 7.  Section 12 — Training Results Summary (for Report)
+# STEP 12 — TRAINING RESULTS SUMMARY
 # ─────────────────────────────────────────────────────────────────────────────
 print('\n' + '='*62)
-print('  SECTION 12 — TRAINING RESULTS SUMMARY')
+print('  STEP 12 — TRAINING RESULTS SUMMARY')
 print('='*62)
 
 summary = pd.DataFrame({
@@ -281,16 +340,26 @@ print(summary.to_string())
 summary.to_csv('team6_phase2_model_comparison.csv')
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 8.  Visualisations
+# VISUALISATIONS
 # ─────────────────────────────────────────────────────────────────────────────
 
-# --- 8a. Hyperparameter tuning curves ---
+# Sentiment distribution of the selected subset
+df_subset['sentiment'].value_counts().plot(
+    kind='bar', color=['#4CAF50', '#F44336', '#FFC107'],
+    title='Sentiment Distribution — 3,000-Review Subset'
+)
+plt.xticks(rotation=0)
+plt.ylabel('Count')
+plt.tight_layout()
+plt.savefig('team6_phase2_sentiment_distribution.png', bbox_inches='tight')
+plt.show()
+
+# Hyperparameter tuning curves
 fig, axes = plt.subplots(1, 2, figsize=(14, 5))
 
-# LR
 lr_Cs = sorted(lr_results.keys())
-axes[0].plot(lr_Cs, [lr_results[c][0] for c in lr_Cs], 'o-', label='Accuracy',  color='steelblue')
-axes[0].plot(lr_Cs, [lr_results[c][1] for c in lr_Cs], 's--', label='F1-W',    color='darkorange')
+axes[0].plot(lr_Cs, [lr_results[c][0] for c in lr_Cs], 'o-', label='Accuracy', color='steelblue')
+axes[0].plot(lr_Cs, [lr_results[c][1] for c in lr_Cs], 's--', label='F1-W', color='darkorange')
 axes[0].axvline(best_C_lr, color='green', linestyle=':', lw=1.5, label=f'Best C={best_C_lr}')
 axes[0].set_xscale('log')
 axes[0].set_title('Logistic Regression — C Tuning')
@@ -298,10 +367,9 @@ axes[0].set_xlabel('C (regularisation)')
 axes[0].set_ylabel('Score')
 axes[0].legend()
 
-# SVM
 svm_Cs = sorted(svm_results.keys())
 axes[1].plot(svm_Cs, [svm_results[c][0] for c in svm_Cs], 'o-', label='Accuracy', color='steelblue')
-axes[1].plot(svm_Cs, [svm_results[c][1] for c in svm_Cs], 's--', label='F1-W',   color='darkorange')
+axes[1].plot(svm_Cs, [svm_results[c][1] for c in svm_Cs], 's--', label='F1-W', color='darkorange')
 axes[1].axvline(best_C_svm, color='green', linestyle=':', lw=1.5, label=f'Best C={best_C_svm}')
 axes[1].set_xscale('log')
 axes[1].set_title('LinearSVC — C Tuning')
@@ -313,44 +381,40 @@ plt.savefig('team6_phase2_hyperparameter_tuning.png', bbox_inches='tight')
 plt.show()
 print('Saved: team6_phase2_hyperparameter_tuning.png')
 
-# --- 8b. Confusion Matrices ---
+# Confusion matrices
 fig, axes = plt.subplots(1, 2, figsize=(14, 5))
-
 for ax, cm, title in zip(axes,
                           [lr_cm, svm_cm],
-                          ['Logistic Regression (C=5.0)', 'LinearSVC (C=1.0)']):
+                          [f'Logistic Regression (C={best_C_lr})',
+                           f'LinearSVC (C={best_C_svm})']):
     sns.heatmap(cm, annot=True, fmt='d', cmap='Blues',
                 xticklabels=CLASSES, yticklabels=CLASSES, ax=ax)
     ax.set_title(f'{title}\nConfusion Matrix')
     ax.set_xlabel('Predicted')
     ax.set_ylabel('Actual')
-
 plt.tight_layout()
 plt.savefig('team6_phase2_confusion_matrices.png', bbox_inches='tight')
 plt.show()
 print('Saved: team6_phase2_confusion_matrices.png')
 
-# --- 8c. Model Comparison Bar Chart ---
-metrics = ['Accuracy', 'Precision (weighted)', 'Recall (weighted)', 'F1 (weighted)']
+# Model comparison bar chart
+metrics_labels = ['Accuracy', 'Precision (W)', 'Recall (W)', 'F1 (W)']
 lr_vals  = [lr_acc,  lr_prec,  lr_rec,  lr_f1]
 svm_vals = [svm_acc, svm_prec, svm_rec, svm_f1]
 
-x = np.arange(len(metrics))
+x = np.arange(len(metrics_labels))
 width = 0.35
-
 fig, ax = plt.subplots(figsize=(11, 5))
-bars1 = ax.bar(x - width/2, lr_vals,  width, label='Logistic Regression', color='steelblue',   edgecolor='white')
-bars2 = ax.bar(x + width/2, svm_vals, width, label='LinearSVC (SVM)',     color='darkorange',  edgecolor='white')
-
-for bar in bars1 + bars2:
+bars1 = ax.bar(x - width/2, lr_vals,  width, label='Logistic Regression', color='steelblue',  edgecolor='white')
+bars2 = ax.bar(x + width/2, svm_vals, width, label='LinearSVC (SVM)',     color='darkorange', edgecolor='white')
+for bar in list(bars1) + list(bars2):
     ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.005,
             f'{bar.get_height():.4f}', ha='center', va='bottom', fontsize=8)
-
 ax.set_ylim(0, 1.05)
 ax.set_title('Model Comparison — Logistic Regression vs LinearSVC')
 ax.set_ylabel('Score')
 ax.set_xticks(x)
-ax.set_xticklabels(metrics, rotation=15, ha='right')
+ax.set_xticklabels(metrics_labels, rotation=15, ha='right')
 ax.legend()
 plt.tight_layout()
 plt.savefig('team6_phase2_model_comparison.png', bbox_inches='tight')
