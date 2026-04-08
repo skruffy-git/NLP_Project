@@ -153,6 +153,7 @@ print('\nPreprocessed dataset saved as: phase2_subset_preprocessed.csv')
 
 # ─────────────────────────────────────────────────────────────────────────────
 # STEP 11(c) — TEXT REPRESENTATION  (TF-IDF)
+# Author: Ryan Frederick
 # ─────────────────────────────────────────────────────────────────────────────
 print('\n--- STEP 11(c): Text Representation (TF-IDF) ---')
 
@@ -176,6 +177,7 @@ print('TF-IDF settings:', TFIDF_PARAMS)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # STEP 11(d) — TRAIN / TEST SPLIT  (70 % train, 30 % test)
+# Author: Ryan Frederick
 # ─────────────────────────────────────────────────────────────────────────────
 print('\n--- STEP 11(d): Train / Test Split ---')
 
@@ -205,6 +207,7 @@ print(y_test.value_counts())
 # STEP 11(e) — MODEL DEVELOPMENT
 # Model 1: Logistic Regression
 # Model 2: Support Vector Machine (LinearSVC)
+# Author: Ryan Frederick
 # ─────────────────────────────────────────────────────────────────────────────
 
 # ── Model 1: Logistic Regression ─────────────────────────────────────────────
