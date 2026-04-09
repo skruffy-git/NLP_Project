@@ -3,14 +3,6 @@
 
 Sentiment Analysis – Phase 2  (Complete Pipeline)
 Team #6 | Dataset: Software (Amazon Product Reviews)
-
-Steps covered:
-  11(a) – Dataset Selection          (Omair Khan)
-  11(b) – Data Preprocessing         (Omair Khan)
-  11(c) – Text Representation        (TF-IDF)
-  11(d) – Train / Test Split         (70 / 30, stratified)
-  11(e) – Model Development          (Logistic Regression + LinearSVC)
-  12    – Training Results Summary
 """
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -153,6 +145,7 @@ print('\nPreprocessed dataset saved as: phase2_subset_preprocessed.csv')
 
 # ─────────────────────────────────────────────────────────────────────────────
 # STEP 11(c) — TEXT REPRESENTATION  (TF-IDF)
+# Author: Ryan Frederick
 # ─────────────────────────────────────────────────────────────────────────────
 print('\n--- STEP 11(c): Text Representation (TF-IDF) ---')
 
@@ -176,6 +169,7 @@ print('TF-IDF settings:', TFIDF_PARAMS)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # STEP 11(d) — TRAIN / TEST SPLIT  (70 % train, 30 % test)
+# Author: Ryan Frederick
 # ─────────────────────────────────────────────────────────────────────────────
 print('\n--- STEP 11(d): Train / Test Split ---')
 
@@ -205,6 +199,7 @@ print(y_test.value_counts())
 # STEP 11(e) — MODEL DEVELOPMENT
 # Model 1: Logistic Regression
 # Model 2: Support Vector Machine (LinearSVC)
+# Author: Ryan Frederick
 # ─────────────────────────────────────────────────────────────────────────────
 
 # ── Model 1: Logistic Regression ─────────────────────────────────────────────
@@ -321,6 +316,7 @@ print(pd.DataFrame(svm_cm, index=CLASSES, columns=CLASSES).to_string())
 
 # ─────────────────────────────────────────────────────────────────────────────
 # STEP 12 — TRAINING RESULTS SUMMARY
+# Author: Ryan Frederick
 # ─────────────────────────────────────────────────────────────────────────────
 print('\n' + '='*62)
 print('  STEP 12 — TRAINING RESULTS SUMMARY')
@@ -423,7 +419,7 @@ print('Saved: team6_phase2_model_comparison.png')
 
 # ─────────────────────────────────────────────────────────────────────────────
 # STEP 15 — RECOMMENDER SYSTEM ENHANCEMENT
-# Author: Ajmal Afzalzada (301413451)
+# Author: Ajmal Afzalzada 
 # ─────────────────────────────────────────────────────────────────────────────
 # Approach: Sentiment-Adjusted Rating
 # Based on Pero & Horvath (2013) — Section 4.3.3 of:
@@ -481,7 +477,7 @@ print('Saved: step15_adjusted_ratings.csv')
 
 # ─────────────────────────────────────────────────────────────────────────────
 # STEP 16 — LLM SUMMARIZATION
-# Author: Ajmal Afzalzada (301413451)
+# Author: Ajmal Afzalzada 
 # ─────────────────────────────────────────────────────────────────────────────
 # Model: facebook/bart-large-cnn (Hugging Face, hosted locally)
 # Task : Summarize 10 reviews with 100+ words to ~50 words each
@@ -557,7 +553,7 @@ print('\nSaved: step16_summaries.csv')
 
 # ─────────────────────────────────────────────────────────────────────────────
 # STEP 17 — LLM RESPONSE GENERATION
-# Author: Ajmal Afzalzada (301413451)
+# Author: Ajmal Afzalzada 
 # ─────────────────────────────────────────────────────────────────────────────
 # Model: google/flan-t5-base (Hugging Face, hosted locally)
 # Task : Select one question-nature review and generate a customer service
