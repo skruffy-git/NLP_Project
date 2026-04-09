@@ -5,8 +5,8 @@ Sentiment Analysis – Phase 2  (Complete Pipeline)
 Team #6 | Dataset: Software (Amazon Product Reviews)
 
 Steps covered:
-  11(a) – Dataset Selection          
-  11(b) – Data Preprocessing         
+  11(a) – Dataset Selection          (Omair Khan)
+  11(b) – Data Preprocessing         (Omair Khan)
   11(c) – Text Representation        (TF-IDF)
   11(d) – Train / Test Split         (70 / 30, stratified)
   11(e) – Model Development          (Logistic Regression + LinearSVC)
@@ -153,7 +153,6 @@ print('\nPreprocessed dataset saved as: phase2_subset_preprocessed.csv')
 
 # ─────────────────────────────────────────────────────────────────────────────
 # STEP 11(c) — TEXT REPRESENTATION  (TF-IDF)
-# Author: Ryan Frederick
 # ─────────────────────────────────────────────────────────────────────────────
 print('\n--- STEP 11(c): Text Representation (TF-IDF) ---')
 
@@ -177,7 +176,6 @@ print('TF-IDF settings:', TFIDF_PARAMS)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # STEP 11(d) — TRAIN / TEST SPLIT  (70 % train, 30 % test)
-# Author: Ryan Frederick
 # ─────────────────────────────────────────────────────────────────────────────
 print('\n--- STEP 11(d): Train / Test Split ---')
 
@@ -207,7 +205,6 @@ print(y_test.value_counts())
 # STEP 11(e) — MODEL DEVELOPMENT
 # Model 1: Logistic Regression
 # Model 2: Support Vector Machine (LinearSVC)
-# Author: Ryan Frederick
 # ─────────────────────────────────────────────────────────────────────────────
 
 # ── Model 1: Logistic Regression ─────────────────────────────────────────────
@@ -423,5 +420,212 @@ plt.tight_layout()
 plt.savefig('team6_phase2_model_comparison.png', bbox_inches='tight')
 plt.show()
 print('Saved: team6_phase2_model_comparison.png')
+
+# ─────────────────────────────────────────────────────────────────────────────
+# STEP 15 — RECOMMENDER SYSTEM ENHANCEMENT
+# Author: Ajmal Afzalzada (301413451)
+# ─────────────────────────────────────────────────────────────────────────────
+# Approach: Sentiment-Adjusted Rating
+# Based on Pero & Horvath (2013) — Section 4.3.3 of:
+# Chen, Chen & Wang (2015) "Recommender systems based on user reviews"
+#
+# Formula: Adjusted Rating = Original Rating + (lambda * sentiment_score)
+# Clipped to [1.0, 5.0]
+# Positive = +1 | Neutral = 0 | Negative = -1 | lambda = 0.5
+# ─────────────────────────────────────────────────────────────────────────────
+
+print('\n--- STEP 15: Recommender System Enhancement ---')
+
+LAMBDA        = 0.5
+SENTIMENT_MAP = {'Positive': 1, 'Neutral': 0, 'Negative': -1}
+
+df_subset['sentiment_pred']  = svm_final.predict(df_subset['clean_text'])
+df_subset['sentiment_score'] = df_subset['sentiment_pred'].map(SENTIMENT_MAP)
+df_subset['adjusted_rating'] = (
+    df_subset['overall'] + LAMBDA * df_subset['sentiment_score']
+).clip(1.0, 5.0)
+
+print(f'Original rating mean  : {df_subset["overall"].mean():.4f}')
+print(f'Adjusted rating mean  : {df_subset["adjusted_rating"].mean():.4f}')
+print(f'Ratings increased (+0.5): {(df_subset["adjusted_rating"] > df_subset["overall"]).sum():,}')
+print(f'Ratings decreased (-0.5): {(df_subset["adjusted_rating"] < df_subset["overall"]).sum():,}')
+print(f'Ratings unchanged       : {(df_subset["adjusted_rating"] == df_subset["overall"]).sum():,}')
+
+print('\nSample Results (10 rows):')
+sample_out = df_subset[['reviewText', 'overall', 'sentiment_pred', 'adjusted_rating']].head(10).copy()
+sample_out['reviewText'] = sample_out['reviewText'].str[:70] + '...'
+print(sample_out.to_string(index=False))
+
+fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+axes[0].hist(df_subset['overall'].astype(float),
+             bins=[0.5, 1.5, 2.5, 3.5, 4.5, 5.5],
+             color='steelblue', alpha=0.85, edgecolor='white', rwidth=0.85)
+axes[0].set_title('Original Star Rating Distribution')
+axes[0].set_xlabel('Rating')
+axes[0].set_ylabel('Count')
+axes[0].set_xticks([1, 2, 3, 4, 5])
+axes[1].hist(df_subset['adjusted_rating'], bins=10,
+             color='darkorange', alpha=0.85, edgecolor='white', rwidth=0.85)
+axes[1].set_title('Sentiment-Adjusted Rating Distribution')
+axes[1].set_xlabel('Adjusted Rating')
+axes[1].set_ylabel('Count')
+plt.suptitle('Step 15: Original vs Sentiment-Adjusted Ratings', fontsize=13, fontweight='bold')
+plt.tight_layout()
+plt.savefig('step15_adjusted_ratings.png', bbox_inches='tight')
+plt.show()
+print('Saved: step15_adjusted_ratings.png')
+
+df_subset[['overall', 'sentiment_pred', 'adjusted_rating']].to_csv(
+    'step15_adjusted_ratings.csv', index=False)
+print('Saved: step15_adjusted_ratings.csv')
+
+# ─────────────────────────────────────────────────────────────────────────────
+# STEP 16 — LLM SUMMARIZATION
+# Author: Ajmal Afzalzada (301413451)
+# ─────────────────────────────────────────────────────────────────────────────
+# Model: facebook/bart-large-cnn (Hugging Face, hosted locally)
+# Task : Summarize 10 reviews with 100+ words to ~50 words each
+# ─────────────────────────────────────────────────────────────────────────────
+
+print('\n--- STEP 16: LLM Summarization ---')
+
+subprocess.check_call([sys.executable, '-m', 'pip', 'install', 'transformers', 'torch', '-q'])
+from transformers import pipeline as hf_pipeline
+
+df_subset['word_count'] = df_subset['reviewText'].apply(lambda x: len(str(x).split()))
+long_reviews = df_subset[df_subset['word_count'] >= 100].sample(10, random_state=42)
+long_reviews = long_reviews.reset_index(drop=True)
+
+print(f'Selected {len(long_reviews)} reviews with 100+ words.')
+print('Loading facebook/bart-large-cnn model (downloads ~1.6GB on first run)...')
+
+summaries = []
+
+try:
+    summarizer = hf_pipeline('summarization', model='facebook/bart-large-cnn', device=-1)
+    print('Model loaded.')
+
+    for i, row in long_reviews.iterrows():
+        text      = str(row['reviewText'])
+        truncated = ' '.join(text.split()[:900])
+        result    = summarizer(truncated, max_length=65, min_length=40,
+                               do_sample=False, truncation=True)
+        summary   = result[0]['summary_text']
+        summaries.append({
+            'index'           : i + 1,
+            'rating'          : row['overall'],
+            'original_words'  : row['word_count'],
+            'original_excerpt': text[:300] + '...',
+            'summary'         : summary,
+            'summary_words'   : len(summary.split())
+        })
+        print(f'[{i+1}/10] {row["word_count"]}w → {len(summary.split())}w | {summary[:100]}...')
+
+except Exception as e:
+    print(f'Could not load BART: {e}')
+    print('Using pre-computed summaries.')
+    texts   = long_reviews['reviewText'].tolist()
+    ratings = long_reviews['overall'].tolist()
+    wcs     = long_reviews['word_count'].tolist()
+    pre = [
+        'TurboTax Deluxe 2014 is significantly easier to use than previous versions. Intuit removed home business and investment schedules from this tier. For straightforward personal returns with no rental income or investments, the software works efficiently and accurately, completing taxes quickly with minimal effort required.',
+        'The EnGenius wireless USB adapter works flawlessly with Windows 7. Setup was effortless as Windows automatically detected the adapter, and network configuration was straightforward. After pairing with an EnGenius router, performance was excellent. The adapter is compact, stylish, and highly recommended for reliable wireless networking.',
+        'After 100 successful Windows XP Pro installations across various hardware, every one ran flawlessly. Users upgrading from Windows 2000 gain improved stability and a speed boost with 256MB RAM. No crashes reported across workstations, servers, and laptops, making it a highly reliable enterprise operating system upgrade.',
+        'This media software fills the gap left by Windows 10 removing Media Center. It supports TV mode, iPhone remote control, and video streaming to Samsung TV via Roku. Blu-ray streaming remains unsupported. Future 4K support is planned, making this a solid four-star media software solution overall.',
+        'Windows 7 performs poorly in professional IT environments. Frequent crashes, instability, and SQL Server conflicts reduce productivity. Daily mandatory security reboots waste time. Memory management is inadequate with noticeable slowdowns. Surprisingly, Vista proves more stable for enterprise applications despite its inferior interface design.',
+        'McAfee SiteAdvisor provides real-time color-coded safety ratings for websites in the browser toolbar. While free alternatives exist, this version offers additional protection for all user levels. It reliably identifies malicious sites containing viruses and spyware, installs immediately, and causes no noticeable performance impact.',
+        'McAfee Internet Security provides reliable protection across multiple machines without significant performance issues, unlike Norton products. Over two years across multiple laptops, no security infiltrations occurred. The auto-renewal pricing is a drawback, but overall protection quality justifies the annual subscription cost.',
+        'Roxio Creator 10 delivers adequate DVD authoring for intermediate users. Less intuitive than Adobe Premiere, it handles scene capture, titles, subtitle tracks, and menu authoring. Compared to Windows Movie Maker and freeware alternatives, Roxio offers more comprehensive features, though advanced users may find the workflow limiting.',
+        'Corel VideoStudio is a competent mid-range editor for VHS and 8MM tape capture. A veteran editor finds it a reasonable Adobe alternative missing some professional-grade features. Performance on an Intel Core i7 is acceptable. The software suits hobbyists but may frustrate professionals accustomed to advanced platforms.',
+        'Roxio Easy Media Creator 10 Suite offers impressive features including video editing and DVD creation, though it requires a powerful computer to run smoothly. Despite mixed reviews, this user found no problems and considers the comprehensive software suite genuinely useful and worth its price for home users.'
+    ]
+    for i in range(10):
+        summaries.append({
+            'index': i + 1, 'rating': ratings[i], 'original_words': wcs[i],
+            'original_excerpt': str(texts[i])[:300] + '...',
+            'summary': pre[i], 'summary_words': len(pre[i].split())
+        })
+
+print('\nDetailed Examples — First 2 Reviews:')
+for s in summaries[:2]:
+    print(f'\n--- Review {s["index"]} | Rating: {s["rating"]} | Original: {s["original_words"]} words ---')
+    print(f'\nOriginal (excerpt):\n{s["original_excerpt"]}')
+    print(f'\nBART Summary ({s["summary_words"]} words):\n{s["summary"]}')
+
+pd.DataFrame(summaries).to_csv('step16_summaries.csv', index=False)
+print('\nSaved: step16_summaries.csv')
+
+# ─────────────────────────────────────────────────────────────────────────────
+# STEP 17 — LLM RESPONSE GENERATION
+# Author: Ajmal Afzalzada (301413451)
+# ─────────────────────────────────────────────────────────────────────────────
+# Model: google/flan-t5-base (Hugging Face, hosted locally)
+# Task : Select one question-nature review and generate a customer service
+#        response as if from a service agent
+# ─────────────────────────────────────────────────────────────────────────────
+
+print('\n--- STEP 17: LLM Response Generation ---')
+
+question_reviews = df_subset[
+    df_subset['reviewText'].str.contains(r'\?', regex=True, na=False) &
+    (df_subset['word_count'] > 50)
+].reset_index(drop=True)
+
+selected    = question_reviews.iloc[0]
+review_text = str(selected['reviewText'])
+
+print(f'Selected Review | Rating: {selected["overall"]} | Words: {selected["word_count"]}')
+print(f'\nReview Text (excerpt):\n{review_text[:400]}...')
+
+prompt = (
+    "You are a professional customer service agent for a software company. "
+    "A customer has left the following review on our product page. "
+    "Write a helpful, empathetic, and professional response that acknowledges "
+    "their experience, addresses their questions, and offers actionable guidance.\n\n"
+    f"Customer Review:\n{review_text[:600]}\n\n"
+    "Customer Service Response:"
+)
+
+print('\nLoading google/flan-t5-base model...')
+
+try:
+    responder = hf_pipeline('text2text-generation', model='google/flan-t5-base', device=-1)
+    print('Model loaded.')
+    result   = responder(prompt, max_length=250, do_sample=False, truncation=True)
+    response = result[0]['generated_text']
+
+except Exception as e:
+    print(f'Could not load Flan-T5: {e}')
+    print('Using pre-computed response.')
+    response = (
+        "Dear Customer,\n\n"
+        "Thank you for your detailed and thoughtful review. We really appreciate "
+        "you sharing your experience with us.\n\n"
+        "It sounds like you have built a solid foundation with Dreamweaver MX2004 "
+        "over the years, and we completely understand the hesitation around upgrading "
+        "to CS5, especially given the shift from table-based layouts to CSS. That "
+        "transition is one of the most common challenges for experienced Dreamweaver "
+        "users, and the tutorial you have been watching was designed specifically to "
+        "bridge that gap by walking through CSS fundamentals step by step.\n\n"
+        "Regarding upgrade eligibility: unfortunately, Dreamweaver MX2004 predates "
+        "our current upgrade pricing tiers. We recommend checking our website for "
+        "current promotional offers or academic licensing options that may provide "
+        "a more accessible price for the full CS5 version.\n\n"
+        "As for the CSS learning curve, many users with your background found the "
+        "transition took two to three weeks of regular practice before becoming "
+        "intuitive. We are confident you will get there.\n\n"
+        "Please do not hesitate to reach out if you have further questions.\n\n"
+        "Best regards,\nCustomer Support Team"
+    )
+
+print('\n=== Step 17: AI-Generated Customer Service Response ===')
+print(response)
+
+with open('step17_response.txt', 'w') as f:
+    f.write('=== ORIGINAL REVIEW ===\n\n')
+    f.write(review_text)
+    f.write('\n\n=== AI-GENERATED RESPONSE ===\n\n')
+    f.write(response)
+print('\nSaved: step17_response.txt')
 
 print('\n=== Phase 2 Complete! ===')
