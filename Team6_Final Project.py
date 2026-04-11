@@ -1,8 +1,23 @@
 # -*- coding: utf-8 -*-
-"""team6_phase2_complete.py
+"""Team6_Final_Project.py
 
 Sentiment Analysis – Phase 2  (Complete Pipeline)
 Team #6 | Dataset: Software (Amazon Product Reviews)
+Course : COMP 262 – NLP
+Professor: Dr. Sajid Hussain
+
+Steps covered:
+  11(a) – Dataset Selection & Subset Exploration    Omair Khan
+  11(b) – Data Preprocessing                        Omair Khan
+  11(c) – Text Representation (TF-IDF)              Ryan Frederick
+  11(d) – Train / Test Split (70/30, stratified)    Ryan Frederick
+  11(e) – Model Development: LR + LinearSVC         Ryan Frederick
+  12    – Training Results Summary                  Ryan Frederick
+  13    – Testing & Evaluation                      Hardiksinh Zala
+  14    – Apples-to-Apples: Lexicon vs ML           Hardiksinh Zala
+  15    – Recommender System Enhancement            Ajmal Afzalzada
+  16    – LLM Summarization (BART)                  Ajmal Afzalzada
+  17    – LLM Response Generation (Flan-T5)         Ajmal Afzalzada
 """
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -106,6 +121,67 @@ print(df_subset['sentiment'].value_counts())
 df_subset['review_length_words'] = df_subset['text'].apply(lambda x: len(x.split()))
 print('\nReview length statistics (words):')
 print(df_subset['review_length_words'].describe())
+
+# ── Subset Data Exploration ───────────────────────────────────────────────────
+print('\n--- STEP 11(a): Subset Data Exploration ---')
+
+# Rating distribution chart
+fig, axes = plt.subplots(1, 2, figsize=(13, 4))
+rating_counts = df_subset['overall'].value_counts().sort_index()
+axes[0].bar(rating_counts.index.astype(str), rating_counts.values,
+            color=sns.color_palette('muted'), edgecolor='white')
+axes[0].set_title('Star Rating Distribution (3,000-Review Subset)')
+axes[0].set_xlabel('Star Rating')
+axes[0].set_ylabel('Count')
+for i, v in enumerate(rating_counts.values):
+    axes[0].text(i, v + 10, str(v), ha='center', fontsize=9)
+
+axes[1].pie(rating_counts.values,
+            labels=[f'{r}★' for r in rating_counts.index],
+            autopct='%1.1f%%', startangle=140,
+            colors=sns.color_palette('muted', len(rating_counts)))
+axes[1].set_title('Sentiment Class Share')
+plt.tight_layout()
+plt.savefig('step11a_subset_rating_distribution.png', bbox_inches='tight')
+plt.show()
+print('Saved: step11a_subset_rating_distribution.png')
+
+# Review length distribution + outlier detection
+p95 = df_subset['review_length_words'].quantile(0.95)
+p99 = df_subset['review_length_words'].quantile(0.99)
+outliers_count = (df_subset['review_length_words'] > p99).sum()
+print(f'\nReview length outliers (above 99th percentile = {p99:.0f} words): {outliers_count}')
+print(f'95th percentile length : {p95:.0f} words')
+
+fig, axes = plt.subplots(1, 2, figsize=(13, 4))
+axes[0].hist(df_subset['review_length_words'], bins=60,
+             color='mediumpurple', edgecolor='white')
+axes[0].axvline(p99, color='red', linestyle='--', lw=1.5, label=f'99th pct ({p99:.0f}w)')
+axes[0].set_xlim(0, 800)
+axes[0].set_title('Review Length Distribution (subset)')
+axes[0].set_xlabel('Word Count')
+axes[0].set_ylabel('Frequency')
+axes[0].legend()
+
+axes[1].boxplot(df_subset['review_length_words'], vert=False, patch_artist=True,
+                boxprops=dict(facecolor='mediumpurple', color='purple'))
+axes[1].set_title('Review Length Boxplot (subset)')
+axes[1].set_xlabel('Word Count')
+plt.tight_layout()
+plt.savefig('step11a_subset_review_length.png', bbox_inches='tight')
+plt.show()
+print('Saved: step11a_subset_review_length.png')
+
+# Duplicate check on subset
+dup_text = df_subset['text'].duplicated().sum()
+dup_pair = df_subset.duplicated(subset=['reviewText', 'summary']).sum()
+print(f'\nDuplicate combined texts  : {dup_text}')
+print(f'Duplicate (text+summary)  : {dup_pair}')
+if dup_text > 0:
+    df_subset = df_subset[~df_subset['text'].duplicated()].copy()
+    print(f'Duplicates removed. Subset size now: {len(df_subset):,}')
+else:
+    print('No duplicates found — subset is clean.')
 
 # ─────────────────────────────────────────────────────────────────────────────
 # STEP 11(b) — DATA PREPROCESSING
@@ -418,8 +494,110 @@ plt.show()
 print('Saved: team6_phase2_model_comparison.png')
 
 # ─────────────────────────────────────────────────────────────────────────────
+# STEP 14 — APPLES-TO-APPLES COMPARISON: LEXICON vs ML ON THE SAME DATA
+# Author: Ryan Frederick
+# ─────────────────────────────────────────────────────────────────────────────
+# The Phase 1 lexicon models (VADER & TextBlob) were evaluated on a random
+# 1,000-review sample.  To compare fairly, we:
+#   1. Draw the SAME 1,000-review sample (random_state=42 matches Phase 1)
+#   2. Re-run the lexicon models on that sample
+#   3. Re-run the best ML models (LR C=best, SVM C=best) on the same sample
+#   4. Compare all four models on identical data using the same metrics
+# ─────────────────────────────────────────────────────────────────────────────
+
+print('\n' + '='*62)
+print('  STEP 14 — APPLES-TO-APPLES: LEXICON vs ML (same 1,000 reviews)')
+print('='*62)
+
+subprocess.check_call([sys.executable, '-m', 'pip', 'install', 'vaderSentiment', 'textblob', '-q'])
+from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
+from textblob import TextBlob
+
+# --- Shared 1,000-review sample (mirrors Phase 1 selection) ---
+SAMPLE_N  = 1000
+df_sample = df.sample(n=SAMPLE_N, random_state=SEED).reset_index(drop=True)
+df_sample['label'] = df_sample['sentiment'].str.capitalize()
+
+# Apply the same preprocessing pipeline used in 11(b)
+df_sample['clean_text'] = df_sample['text'].apply(preprocess_text)
+
+y_sample_true = df_sample['label']
+
+# --- Lexicon preprocessing (minimal — VADER needs raw text, TextBlob cleaned) ---
+def clean_vader(text):
+    """Light clean for VADER: remove HTML/URLs only; preserve punctuation/caps."""
+    text = re.sub(r'<[^>]+>', ' ', text)
+    text = re.sub(r'http\S+|www\.\S+', ' ', text)
+    return re.sub(r'\s+', ' ', text).strip()
+
+df_sample['text_vader']    = df_sample['text'].apply(clean_vader)
+df_sample['text_textblob'] = df_sample['clean_text']  # same pipeline as ML
+
+# --- VADER predictions ---
+va = SentimentIntensityAnalyzer()
+def vader_predict(text):
+    c = va.polarity_scores(text)['compound']
+    return 'Positive' if c >= 0.05 else ('Negative' if c <= -0.05 else 'Neutral')
+
+df_sample['vader_pred'] = df_sample['text_vader'].apply(vader_predict)
+
+# --- TextBlob predictions ---
+def tb_predict(text):
+    p = TextBlob(text).sentiment.polarity
+    return 'Positive' if p > 0.05 else ('Negative' if p < -0.05 else 'Neutral')
+
+df_sample['tb_pred'] = df_sample['text_textblob'].apply(tb_predict)
+
+# --- ML models on the same sample ---
+df_sample['lr_pred']  = lr_final.predict(df_sample['clean_text'])
+df_sample['svm_pred'] = svm_final.predict(df_sample['clean_text'])
+
+# --- Evaluate all four models ---
+def eval_model(y_true, y_pred, name):
+    acc  = accuracy_score(y_true, y_pred)
+    prec = precision_score(y_true, y_pred, labels=CLASSES, average='weighted', zero_division=0)
+    rec  = recall_score(y_true, y_pred, labels=CLASSES, average='weighted', zero_division=0)
+    f1w  = f1_score(y_true, y_pred, labels=CLASSES, average='weighted', zero_division=0)
+    print(f'\n  {name}')
+    print(classification_report(y_true, y_pred, labels=CLASSES, zero_division=0))
+    return {'Model': name, 'Accuracy': round(acc,4), 'Precision(W)': round(prec,4),
+            'Recall(W)': round(rec,4), 'F1(W)': round(f1w,4)}
+
+rows = []
+rows.append(eval_model(y_sample_true, df_sample['vader_pred'],  'VADER (lexicon)'))
+rows.append(eval_model(y_sample_true, df_sample['tb_pred'],     'TextBlob (lexicon)'))
+rows.append(eval_model(y_sample_true, df_sample['lr_pred'],     'Logistic Regression (ML)'))
+rows.append(eval_model(y_sample_true, df_sample['svm_pred'],    'LinearSVC (ML)'))
+
+comparison_df = pd.DataFrame(rows).set_index('Model')
+print('\n=== STEP 14: All-Model Comparison on 1,000-Review Sample ===')
+print(comparison_df.to_string())
+comparison_df.to_csv('step14_model_comparison.csv')
+print('\nSaved: step14_model_comparison.csv')
+
+# Comparison bar chart
+fig, ax = plt.subplots(figsize=(12, 5))
+x = np.arange(len(comparison_df))
+metrics_14 = ['Accuracy', 'Precision(W)', 'Recall(W)', 'F1(W)']
+colors_14  = ['#4e79a7', '#f28e2b', '#59a14f', '#e15759']
+width_14   = 0.2
+for i, (metric, color) in enumerate(zip(metrics_14, colors_14)):
+    ax.bar(x + i * width_14, comparison_df[metric], width_14,
+           label=metric, color=color, edgecolor='white')
+ax.set_xticks(x + width_14 * 1.5)
+ax.set_xticklabels(comparison_df.index, rotation=15, ha='right')
+ax.set_ylim(0, 1.05)
+ax.set_title('Step 14: Lexicon vs ML — All Metrics on Same 1,000 Reviews')
+ax.set_ylabel('Score')
+ax.legend(loc='lower right')
+plt.tight_layout()
+plt.savefig('step14_all_model_comparison.png', bbox_inches='tight')
+plt.show()
+print('Saved: step14_all_model_comparison.png')
+
+# ─────────────────────────────────────────────────────────────────────────────
 # STEP 15 — RECOMMENDER SYSTEM ENHANCEMENT
-# Author: Ajmal Afzalzada 
+# Author: Ajmal Afzalzada
 # ─────────────────────────────────────────────────────────────────────────────
 # Approach: Sentiment-Adjusted Rating
 # Based on Pero & Horvath (2013) — Section 4.3.3 of:
@@ -431,6 +609,28 @@ print('Saved: team6_phase2_model_comparison.png')
 # ─────────────────────────────────────────────────────────────────────────────
 
 print('\n--- STEP 15: Recommender System Enhancement ---')
+
+print("""
+APPROACH EXPLANATION:
+  Standard recommender systems rely solely on star ratings to rank products.
+  However, a 4-star review containing highly negative language (e.g. "constant
+  crashes, terrible support") should be weighted differently from a genuinely
+  enthusiastic 4-star review.  By incorporating ML-predicted sentiment, we can
+  refine each rating to better reflect the true expressed opinion.
+
+PSEUDOCODE:
+  LAMBDA = 0.5
+  SENTIMENT_MAP = {Positive: +1, Neutral: 0, Negative: -1}
+
+  FOR each review in dataset:
+      sentiment_label  = SVM_model.predict(review.clean_text)
+      sentiment_score  = SENTIMENT_MAP[sentiment_label]
+      adjusted_rating  = original_rating + (LAMBDA * sentiment_score)
+      adjusted_rating  = CLIP(adjusted_rating, min=1.0, max=5.0)
+
+  RESULT: adjusted_rating provides a more nuanced signal for ranking products.
+""")
+
 
 LAMBDA        = 0.5
 SENTIMENT_MAP = {'Positive': 1, 'Neutral': 0, 'Negative': -1}
@@ -477,36 +677,55 @@ print('Saved: step15_adjusted_ratings.csv')
 
 # ─────────────────────────────────────────────────────────────────────────────
 # STEP 16 — LLM SUMMARIZATION
-# Author: Ajmal Afzalzada 
+# Author: Ajmal Afzalzada
 # ─────────────────────────────────────────────────────────────────────────────
 # Model: facebook/bart-large-cnn (Hugging Face, hosted locally)
 # Task : Summarize 10 reviews with 100+ words to ~50 words each
+#
+# NOTE: newer versions of transformers removed 'summarization' from pipeline().
+# We load the model directly via AutoTokenizer + AutoModelForConditionalGeneration
+# which works across all transformers versions.
 # ─────────────────────────────────────────────────────────────────────────────
 
 print('\n--- STEP 16: LLM Summarization ---')
 
 subprocess.check_call([sys.executable, '-m', 'pip', 'install', 'transformers', 'torch', '-q'])
-from transformers import pipeline as hf_pipeline
 
 df_subset['word_count'] = df_subset['reviewText'].apply(lambda x: len(str(x).split()))
 long_reviews = df_subset[df_subset['word_count'] >= 100].sample(10, random_state=42)
 long_reviews = long_reviews.reset_index(drop=True)
 
 print(f'Selected {len(long_reviews)} reviews with 100+ words.')
-print('Loading facebook/bart-large-cnn model (downloads ~1.6GB on first run)...')
+print('Loading facebook/bart-large-cnn model (direct API — downloads ~1.6GB on first run)...')
 
 summaries = []
 
 try:
-    summarizer = hf_pipeline('summarization', model='facebook/bart-large-cnn', device=-1)
+    import torch
+    from transformers import AutoTokenizer, AutoModelForConditionalGeneration
+
+    BART_ID    = 'facebook/bart-large-cnn'
+    bart_tok   = AutoTokenizer.from_pretrained(BART_ID)
+    bart_model = AutoModelForConditionalGeneration.from_pretrained(BART_ID)
+    bart_model.eval()
     print('Model loaded.')
 
     for i, row in long_reviews.iterrows():
         text      = str(row['reviewText'])
         truncated = ' '.join(text.split()[:900])
-        result    = summarizer(truncated, max_length=65, min_length=40,
-                               do_sample=False, truncation=True)
-        summary   = result[0]['summary_text']
+        inputs    = bart_tok(truncated, return_tensors='pt',
+                             max_length=1024, truncation=True)
+        with torch.no_grad():
+            output_ids = bart_model.generate(
+                **inputs,
+                max_new_tokens=65,
+                min_length=40,
+                num_beams=4,
+                length_penalty=2.0,
+                early_stopping=True,
+                no_repeat_ngram_size=3,
+            )
+        summary = bart_tok.decode(output_ids[0], skip_special_tokens=True)
         summaries.append({
             'index'           : i + 1,
             'rating'          : row['overall'],
@@ -553,11 +772,15 @@ print('\nSaved: step16_summaries.csv')
 
 # ─────────────────────────────────────────────────────────────────────────────
 # STEP 17 — LLM RESPONSE GENERATION
-# Author: Ajmal Afzalzada 
+# Author: Ajmal Afzalzada
 # ─────────────────────────────────────────────────────────────────────────────
 # Model: google/flan-t5-base (Hugging Face, hosted locally)
 # Task : Select one question-nature review and generate a customer service
 #        response as if from a service agent
+#
+# NOTE: newer versions of transformers removed 'text2text-generation' from the
+# pipeline() task list. We load the model directly via AutoTokenizer +
+# AutoModelForSeq2SeqLM which works across all transformers versions.
 # ─────────────────────────────────────────────────────────────────────────────
 
 print('\n--- STEP 17: LLM Response Generation ---')
@@ -573,22 +796,39 @@ review_text = str(selected['reviewText'])
 print(f'Selected Review | Rating: {selected["overall"]} | Words: {selected["word_count"]}')
 print(f'\nReview Text (excerpt):\n{review_text[:400]}...')
 
+# Prompt engineering: explicit instruction prefix works well for Flan-T5
 prompt = (
     "You are a professional customer service agent for a software company. "
-    "A customer has left the following review on our product page. "
-    "Write a helpful, empathetic, and professional response that acknowledges "
-    "their experience, addresses their questions, and offers actionable guidance.\n\n"
-    f"Customer Review:\n{review_text[:600]}\n\n"
+    "A customer has left the following review. Write a helpful, empathetic, and "
+    "professional response that acknowledges their experience, addresses their "
+    "questions, and offers actionable guidance.\n\n"
+    f"Customer Review: {review_text[:600]}\n\n"
     "Customer Service Response:"
 )
 
-print('\nLoading google/flan-t5-base model...')
+print('\nLoading google/flan-t5-base model (direct API — compatible with all transformers versions)...')
 
 try:
-    responder = hf_pipeline('text2text-generation', model='google/flan-t5-base', device=-1)
+    import torch
+    from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
+
+    MODEL_ID  = 'google/flan-t5-base'
+    tokenizer = AutoTokenizer.from_pretrained(MODEL_ID)
+    model     = AutoModelForSeq2SeqLM.from_pretrained(MODEL_ID)
+    model.eval()
     print('Model loaded.')
-    result   = responder(prompt, max_length=250, do_sample=False, truncation=True)
-    response = result[0]['generated_text']
+
+    inputs  = tokenizer(prompt, return_tensors='pt',
+                        max_length=512, truncation=True)
+    with torch.no_grad():
+        output_ids = model.generate(
+            **inputs,
+            max_new_tokens=250,
+            num_beams=4,
+            early_stopping=True,
+            no_repeat_ngram_size=3,
+        )
+    response = tokenizer.decode(output_ids[0], skip_special_tokens=True)
 
 except Exception as e:
     print(f'Could not load Flan-T5: {e}')
